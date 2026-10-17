@@ -1,0 +1,11 @@
+build/
+install/
+log/
+compile_commands.json
+.vscode/
+.idea/
+__pycache__/
+*.pyc
+*.ulg
+*.mcap
+*.db3

@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+    container: ros:jazzy-ros-base
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: src/drone_gnc
+
+      # Message definitions must match the PX4 version used in simulation.
+      - name: Fetch px4_msgs
+        run: git clone --depth 1 --branch release/1.17 https://github.com/PX4/px4_msgs.git src/px4_msgs
+
+      - name: Install dependencies
+        run: |
+          apt-get update
+          rosdep update
+          rosdep install --from-paths src --ignore-src -y
+
+      - name: Build
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          colcon build --packages-up-to gnc_ros
+
+      - name: Test
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          colcon test --packages-select gnc_core
+          colcon test-result --verbose
+
+  format:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install clang-format
+        run: sudo apt-get update && sudo apt-get install -y clang-format
+      - name: Check formatting
+        run: find . -name '*.cpp' -o -name '*.hpp' | xargs clang-format --dry-run --Werror
