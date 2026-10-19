@@ -10,6 +10,7 @@ find_package(Eigen3 REQUIRED)
 
 add_library(gnc_core
   src/control/pid.cpp
+  src/mission/mission_state_machine.cpp
 )
 target_include_directories(gnc_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -32,6 +33,8 @@ if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
   ament_add_gtest(test_pid test/test_pid.cpp)
   target_link_libraries(test_pid gnc_core)
+  ament_add_gtest(test_mission_state_machine test/test_mission_state_machine.cpp)
+  target_link_libraries(test_mission_state_machine gnc_core)
 endif()
 
 ament_package()

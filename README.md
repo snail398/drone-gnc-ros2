@@ -11,7 +11,7 @@ Work in progress.
 
 | Package | What it contains |
 |---|---|
-| `gnc_core` | Algorithms in plain C++ (no ROS): controllers, estimators, planners. Unit-tested with gtest. |
+| `gnc_core` | Algorithms in plain C++ (no ROS): controllers, mission logic, later estimators and planners. Unit-tested with gtest. |
 | `gnc_ros` | Thin ROS 2 nodes that feed PX4 data into `gnc_core` and publish setpoints back. |
 
 Keeping the algorithms out of ROS means they can be tested in milliseconds, without a simulator.
@@ -20,7 +20,7 @@ Keeping the algorithms out of ROS means they can be tested in milliseconds, with
 
 - [x] Simulation environment: PX4 v1.17 SITL, Gazebo Harmonic, ROS 2 Jazzy, uXRCE-DDS
 - [x] Repository skeleton, CI, PID controller with anti-windup
-- [ ] Offboard state machine: arm, take off, fly waypoints, land
+- [x] Offboard mission state machine: arm, take off, fly waypoints, land (PX4 controllers still in the loop)
 - [ ] Own position/velocity controller (attitude + thrust setpoints)
 - [ ] Own attitude controller (body rate setpoints)
 - [ ] Own EKF: IMU prediction, GPS and barometer updates, compared against PX4 EKF2
@@ -43,8 +43,19 @@ colcon test --packages-select gnc_core && colcon test-result --verbose
 
 ## Run
 
-With PX4 SITL and `MicroXRCEAgent udp4 -p 8888` running:
+With PX4 SITL and `MicroXRCEAgent udp4 -p 8888` running, fly a 10 x 10 m square at 5 m:
 
 ```bash
-ros2 run gnc_ros position_monitor
+ros2 launch gnc_ros mission.launch.py
 ```
+
+Another mission file can be passed with `mission:=/path/to/mission.yaml`; see
+`gnc_ros/config/square_mission.yaml` for the format.
+
+The mission logic is a plain state machine in `gnc_core` (wait for pre-flight checks,
+stream setpoints, switch to offboard and arm, take off, visit waypoints, land). It aborts
+and leaves the vehicle to PX4 if offboard mode or arming is lost in flight. The ROS node
+only converts PX4 messages to and from it, so the whole mission is covered by unit tests
+against a simulated vehicle.
+
+To just print the vehicle position: `ros2 run gnc_ros position_monitor`.

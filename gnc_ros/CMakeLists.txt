@@ -10,10 +10,13 @@ find_package(rclcpp REQUIRED)
 find_package(px4_msgs REQUIRED)
 find_package(gnc_core REQUIRED)
 
-add_executable(position_monitor src/position_monitor.cpp)
-target_link_libraries(position_monitor rclcpp::rclcpp ${px4_msgs_TARGETS} gnc_core::gnc_core)
-target_compile_options(position_monitor PRIVATE -Wall -Wextra -Wpedantic -Werror)
+foreach(node position_monitor mission_node)
+  add_executable(${node} src/${node}.cpp)
+  target_link_libraries(${node} rclcpp::rclcpp ${px4_msgs_TARGETS} gnc_core::gnc_core)
+  target_compile_options(${node} PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  install(TARGETS ${node} DESTINATION lib/${PROJECT_NAME})
+endforeach()
 
-install(TARGETS position_monitor DESTINATION lib/${PROJECT_NAME})
+install(DIRECTORY config launch DESTINATION share/${PROJECT_NAME})
 
 ament_package()
