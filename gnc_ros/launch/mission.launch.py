@@ -14,10 +14,15 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'mission', default_value=str(default_mission),
             description='YAML file with mission_node parameters'),
+        DeclareLaunchArgument(
+            'controller', default_value='px4',
+            description="Position controller: 'px4' (PX4's own) or 'own' (gnc_core)"),
         Node(
             package='gnc_ros',
             executable='mission_node',
-            parameters=[LaunchConfiguration('mission')],
+            # Later entries override earlier ones: the command-line choice wins over the file.
+            parameters=[LaunchConfiguration('mission'),
+                        {'controller': LaunchConfiguration('controller')}],
             output='screen',
             emulate_tty=True),
     ])

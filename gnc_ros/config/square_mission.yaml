@@ -2,6 +2,10 @@
 # Waypoints are (north, east, altitude) triples in metres relative to take-off.
 mission_node:
   ros__parameters:
+    # px4: PX4 flies the position setpoints; own: gnc_core PositionController
+    # sends attitude + thrust and PX4 only runs its attitude/rate loops.
+    controller: px4
+    hover_thrust: 0.6  # x500 in Gazebo (PX4 MPC_THR_HOVER); used by the own controller
     takeoff_altitude: 5.0
     acceptance_radius: 0.5
     hold_time: 2.0
