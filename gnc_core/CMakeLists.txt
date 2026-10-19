@@ -11,6 +11,7 @@ find_package(Eigen3 REQUIRED)
 add_library(gnc_core
   src/control/pid.cpp
   src/control/position_controller.cpp
+  src/guidance/reference_generator.cpp
   src/mission/mission_state_machine.cpp
 )
 target_include_directories(gnc_core PUBLIC
@@ -36,6 +37,8 @@ if(BUILD_TESTING)
   target_link_libraries(test_pid gnc_core)
   ament_add_gtest(test_position_controller test/test_position_controller.cpp)
   target_link_libraries(test_position_controller gnc_core)
+  ament_add_gtest(test_reference_generator test/test_reference_generator.cpp)
+  target_link_libraries(test_reference_generator gnc_core)
   ament_add_gtest(test_mission_state_machine test/test_mission_state_machine.cpp)
   target_link_libraries(test_mission_state_machine gnc_core)
 endif()

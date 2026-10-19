@@ -23,7 +23,8 @@ Keeping the algorithms out of ROS means they can be tested in milliseconds, with
 - [x] Repository skeleton, CI, PID controller with anti-windup
 - [x] Offboard mission state machine: arm, take off, fly waypoints, land (PX4 controllers still in the loop)
 - [x] Own position/velocity controller (attitude + thrust setpoints), compared against PX4's
-- [ ] Setpoint shaping to cut corner overshoot of the own controller
+- [x] Reference generator (bounded acceleration) + feed-forward: corner overshoot removed
+- [ ] Jerk-limited reference; explain the residual sideways excursion at corners
 - [ ] Own attitude controller (body rate setpoints)
 - [ ] Own EKF: IMU prediction, GPS and barometer updates, compared against PX4 EKF2
 - [ ] Flight log analysis tooling (ULog / rosbag2)
@@ -67,44 +68,67 @@ To just print the vehicle position: `ros2 run gnc_ros position_monitor`.
 
 ## Own position controller vs PX4
 
-`controller:=own` replaces PX4's position and velocity loops with
-`gnc_core::control::PositionController`:
+`controller:=own` replaces PX4's position and velocity loops:
 
 ```
-position error --P--> velocity setpoint --PID per axis--> acceleration setpoint
+waypoint --ReferenceGenerator--> reference position, velocity, acceleration
+  --PositionController--> P on position + PID per axis on velocity + feed-forward
   --> thrust direction + collective thrust --> attitude quaternion + thrust --> PX4
 ```
 
 PX4 then runs only its attitude and rate controllers. The acceleration-to-attitude step uses
 the same formulation as PX4's `PositionControl` (tilt for horizontal acceleration, collective
-thrust scaled by the hover thrust for vertical, tilt limit), and the gains start from PX4's
-defaults, so the comparison is about structure rather than tuning.
+thrust scaled by the hover thrust for vertical, tilt limit) and the gains start from PX4's
+defaults.
+
+**Reference generator** (`gnc_core/guidance`). The mission switches waypoints in one step.
+Chasing that step directly made the vehicle accelerate to its speed limit and brake late,
+overshooting each corner by ~0.65 m. The generator instead moves a reference towards the
+waypoint with bounded acceleration (3 m/s^2) and a speed that never exceeds
+`sqrt(2 * a_max * distance)`, so it always stops exactly on the waypoint. The controller
+follows it with velocity and acceleration feed-forward, and the velocity PID differentiates
+the error instead of the measurement (on the measurement, the D term resists the very
+acceleration the reference asks for; that alone accounted for about half of the remaining
+overshoot in the model).
 
 ```bash
-ros2 launch gnc_ros mission.launch.py controller:=own
+ros2 launch gnc_ros mission.launch.py controller:=own                          # shaped
+ros2 launch gnc_ros mission.launch.py controller:=own trajectory_shaping:=false # step targets
 ```
 
-Same square mission flown with each controller in SITL (`tools/compare_flights.py`, offboard
-part of the flight only):
+Same square mission in SITL (`tools/compare_flights.py`, offboard part of the flight; path
+error is the horizontal distance from the route lines):
 
-| Controller | Time in offboard | Altitude error RMS / max | Corner overshoot |
+| Controller | Time | Altitude error RMS / max | Path error RMS / max |
 |---|---|---|---|
-| PX4 | 24.5 s | 0.09 / 0.24 m | 0.28 m |
-| own | 29.7 s | 0.07 / 0.22 m | 0.68 m |
+| PX4 | 24.5 s | 0.09 / 0.24 m | 0.08 / 0.28 m |
+| own, step targets | 29.3 s | 0.06 / 0.22 m | 0.28 / 0.66 m |
+| own, shaped reference | 23.9 s | 0.04 / 0.16 m | 0.17 / 0.31 m |
 
-![Square mission, PX4 vs own controller](docs/m3_px4_vs_own.png)
+![Square mission: PX4, own with step targets, own with shaped reference](docs/position_control_comparison.png)
 
-Altitude hold is on par. At the corners the own controller overshoots more: the mission
-switches the target in one step and the controller accelerates to its 5 m/s limit, while PX4
-shapes the setpoint. The extra settling at each waypoint is also why the mission takes longer
-even though the own controller climbs faster (PX4 spools up for ~3 s before take-off).
-Setpoint shaping is the next step.
+With the shaped reference the corner overshoot is gone, altitude hold is the tightest of the
+three and the mission is the fastest. The horizontal velocity integrator is set to 0.2
+instead of PX4's 0.4: in SITL that gave 0.16 / 0.33 m path error vs 0.18 / 0.38 m (no
+integrator: 0.13 / 0.26 m, but then nothing rejects a steady wind).
 
-To reproduce: record each flight with
-`ros2 bag record /fmu/out/vehicle_local_position_v1 /fmu/out/vehicle_status_v1` (best-effort
-QoS), then
+Open issue: after stopping at a corner the vehicle settles with a slow sideways excursion of
+~0.3 m that takes a few seconds to decay, which is why the RMS path error is still twice
+PX4's. Logged attitude data shows PX4 tracks the commanded tilt within ~0.25 s with no
+directional bias, so the excursion comes from this controller; it appears when the
+reference's braking acceleration ends abruptly (no jerk limit yet). A point-mass model with
+the measured lag does not reproduce it, so the next step is a better vehicle model or
+Gazebo ground truth rather than more tuning by guesswork. An attempt at a jerk-limited
+reference overshot the target and was dropped.
+
+To reproduce: record each flight (best-effort QoS overrides are in `tools/px4_qos.yaml`)
 
 ```bash
-python3 tools/compare_flights.py --mission gnc_ros/config/square_mission.yaml \
-    --flight px4=<bag_dir> --flight own=<bag_dir> --plot comparison.png
+ros2 bag record -o <bag_dir> /fmu/out/vehicle_local_position_v1 /fmu/out/vehicle_status_v1     --qos-profile-overrides-path tools/px4_qos.yaml
+```
+
+then
+
+```bash
+python3 tools/compare_flights.py --mission gnc_ros/config/square_mission.yaml     --flight px4=<bag_dir> --flight own=<bag_dir> --plot comparison.png
 ```

@@ -5,6 +5,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
@@ -17,12 +18,21 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'controller', default_value='px4',
             description="Position controller: 'px4' (PX4's own) or 'own' (gnc_core)"),
+        DeclareLaunchArgument(
+            'trajectory_shaping', default_value='true',
+            description='Own controller only: follow a smooth reference instead of step targets'),
         Node(
             package='gnc_ros',
             executable='mission_node',
             # Later entries override earlier ones: the command-line choice wins over the file.
-            parameters=[LaunchConfiguration('mission'),
-                        {'controller': LaunchConfiguration('controller')}],
+            parameters=[
+                LaunchConfiguration('mission'),
+                {
+                    'controller': LaunchConfiguration('controller'),
+                    'trajectory_shaping': ParameterValue(
+                        LaunchConfiguration('trajectory_shaping'), value_type=bool),
+                },
+            ],
             output='screen',
             emulate_tty=True),
     ])

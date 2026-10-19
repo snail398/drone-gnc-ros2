@@ -83,17 +83,25 @@ def metrics(flight, takeoff_altitude, waypoints):
     cruise = np.argmax(flight.altitude >= takeoff_altitude - 0.1)
     alt_err = flight.altitude[cruise:] - waypoints[:, 2].mean()
 
-    # Horizontal overshoot: how far the path leaves the box spanned by home and the waypoints.
-    lo = np.minimum(waypoints[:, :2].min(axis=0), 0.0)
-    hi = np.maximum(waypoints[:, :2].max(axis=0), 0.0)
+    # Horizontal path error: distance from the route (home -> waypoints) seen from above.
+    # Covers both corner overshoot and sideways drift along a leg.
     xy = np.column_stack([flight.north, flight.east])
-    outside = np.maximum(lo - xy, 0.0) + np.maximum(xy - hi, 0.0)
+    route = np.vstack([[0.0, 0.0], waypoints[:, :2]])
+    path_err = np.min([distance_to_segment(xy, a, b) for a, b in zip(route[:-1], route[1:])],
+                      axis=0)
     return {
         'duration_s': flight.t[-1],
         'alt_rms_m': float(np.sqrt(np.mean(alt_err ** 2))),
         'alt_max_m': float(np.abs(alt_err).max()),
-        'overshoot_m': float(np.linalg.norm(outside, axis=1).max()),
+        'path_rms_m': float(np.sqrt(np.mean(path_err ** 2))),
+        'path_max_m': float(path_err.max()),
     }
+
+
+def distance_to_segment(points, a, b):
+    ab = b - a
+    t = np.clip((points - a) @ ab / max(ab @ ab, 1e-12), 0.0, 1.0)
+    return np.linalg.norm(points - (a + t[:, None] * ab), axis=1)
 
 
 def plot(flights, waypoints, out):
@@ -125,11 +133,11 @@ def main():
     flights = [load_flight(*spec.split('=', 1)) for spec in args.flight]
 
     print(f"{'controller':<12}{'time [s]':>10}{'alt RMS [m]':>13}{'alt max [m]':>13}"
-          f"{'overshoot [m]':>15}")
+          f"{'path RMS [m]':>14}{'path max [m]':>14}")
     for f in flights:
         m = metrics(f, takeoff_altitude, waypoints)
         print(f"{f.name:<12}{m['duration_s']:>10.1f}{m['alt_rms_m']:>13.2f}"
-              f"{m['alt_max_m']:>13.2f}{m['overshoot_m']:>15.2f}")
+              f"{m['alt_max_m']:>13.2f}{m['path_rms_m']:>14.2f}{m['path_max_m']:>14.2f}")
 
     plot(flights, waypoints, args.plot)
     print(f'plot saved to {args.plot}')

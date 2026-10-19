@@ -25,16 +25,27 @@ AttitudeThrustSetpoint PositionController::update(const Eigen::Vector3d& positio
                                                   double yaw_setpoint,
                                                   const Eigen::Vector3d& position,
                                                   const Eigen::Vector3d& velocity, double dt) {
+  guidance::Reference reference;
+  reference.position = position_setpoint;
+  return update(reference, yaw_setpoint, position, velocity, dt);
+}
+
+AttitudeThrustSetpoint PositionController::update(const guidance::Reference& reference,
+                                                  double yaw_setpoint,
+                                                  const Eigen::Vector3d& position,
+                                                  const Eigen::Vector3d& velocity, double dt) {
   AttitudeThrustSetpoint out;
 
-  // Outer loop: position error -> velocity setpoint.
-  out.velocity_setpoint = velocity_setpoint(position_setpoint - position);
+  // Outer loop: reference velocity (feed-forward) + correction for the position error.
+  out.velocity_setpoint = velocity_setpoint(reference.position - position, reference.velocity);
 
-  // Inner loop: velocity error -> acceleration setpoint, one PID per axis.
+  // Inner loop: reference acceleration (feed-forward) + PID per axis on the velocity error.
+  // The feed-forward lets the vehicle follow a moving reference without first building up
+  // an error for the feedback to act on.
   Eigen::Vector3d& acc = out.acceleration_setpoint;
-  acc.x() = vel_x_.update(out.velocity_setpoint.x(), velocity.x(), dt);
-  acc.y() = vel_y_.update(out.velocity_setpoint.y(), velocity.y(), dt);
-  acc.z() = vel_z_.update(out.velocity_setpoint.z(), velocity.z(), dt);
+  acc.x() = reference.acceleration.x() + vel_x_.update(out.velocity_setpoint.x(), velocity.x(), dt);
+  acc.y() = reference.acceleration.y() + vel_y_.update(out.velocity_setpoint.y(), velocity.y(), dt);
+  acc.z() = reference.acceleration.z() + vel_z_.update(out.velocity_setpoint.z(), velocity.z(), dt);
 
   // Acceleration -> thrust. Same formulation as PX4's PositionControl::_accelerationControl:
   // the thrust must cancel gravity and produce `acc`, so its direction (minus body z) is
@@ -59,10 +70,12 @@ void PositionController::reset() {
   vel_z_.reset();
 }
 
-Eigen::Vector3d PositionController::velocity_setpoint(const Eigen::Vector3d& position_error) const {
-  Eigen::Vector3d vel(config_.position_p_xy * position_error.x(),
-                      config_.position_p_xy * position_error.y(),
-                      config_.position_p_z * position_error.z());
+Eigen::Vector3d PositionController::velocity_setpoint(
+    const Eigen::Vector3d& position_error, const Eigen::Vector3d& velocity_feedforward) const {
+  Eigen::Vector3d vel =
+      velocity_feedforward + Eigen::Vector3d(config_.position_p_xy * position_error.x(),
+                                             config_.position_p_xy * position_error.y(),
+                                             config_.position_p_z * position_error.z());
 
   // Limit horizontal speed as a vector so diagonal moves are not faster.
   const double speed_xy = vel.head<2>().norm();

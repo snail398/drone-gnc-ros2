@@ -26,11 +26,14 @@
 #include <vector>
 
 #include "gnc_core/control/position_controller.hpp"
+#include "gnc_core/guidance/reference_generator.hpp"
 #include "gnc_core/mission/mission_state_machine.hpp"
 
 using namespace std::chrono_literals;
 using gnc::control::PositionController;
 using gnc::control::PositionControllerConfig;
+using gnc::guidance::ReferenceGenerator;
+using gnc::guidance::ReferenceLimits;
 using gnc::mission::MissionConfig;
 using gnc::mission::MissionStateMachine;
 using gnc::mission::Output;
@@ -62,7 +65,9 @@ class MissionNode : public rclcpp::Node {
       : Node("mission_node"),
         mission_(load_mission_config()),
         controller_type_(load_controller_type()),
-        position_controller_(load_controller_config()) {
+        position_controller_(load_controller_config()),
+        shaping_(get_parameter("trajectory_shaping").as_bool()),
+        reference_generator_(load_reference_limits()) {
     const auto px4_qos = rclcpp::SensorDataQoS();
     status_sub_ = create_subscription<VehicleStatus>(
         "/fmu/out/vehicle_status_v1", px4_qos, [this](const VehicleStatus& msg) {
@@ -121,7 +126,31 @@ class MissionNode : public rclcpp::Node {
     PositionControllerConfig config;
     config.hover_thrust = declare_parameter("hover_thrust", config.hover_thrust);
     config.max_velocity_xy = declare_parameter("max_velocity_xy", config.max_velocity_xy);
+    config.position_p_xy = declare_parameter("position_p_xy", config.position_p_xy);
+    config.velocity_xy.kp = declare_parameter("velocity_xy_p", config.velocity_xy.kp);
+    config.velocity_xy.ki = declare_parameter("velocity_xy_i", config.velocity_xy.ki);
+    config.velocity_xy.kd = declare_parameter("velocity_xy_d", config.velocity_xy.kd);
+
+    // With a smooth reference the derivative should act on the velocity error:
+    // on the measurement it would resist the very acceleration the reference asks for.
+    if (declare_parameter("trajectory_shaping", true)) {
+      config.velocity_xy.derivative_on = gnc::control::DerivativeOn::kError;
+    }
     return config;
+  }
+
+  ReferenceLimits load_reference_limits() {
+    const auto& controller = position_controller_.config();
+    ReferenceLimits limits;
+    limits.max_velocity_xy = controller.max_velocity_xy;
+    limits.max_velocity_up = controller.max_velocity_up;
+    limits.max_velocity_down = controller.max_velocity_down;
+    limits.max_acceleration = declare_parameter("max_acceleration", limits.max_acceleration);
+    if (controller_type_ == ControllerType::kOwn) {
+      RCLCPP_INFO(get_logger(), "Trajectory shaping: %s (max acceleration %.1f m/s^2)",
+                  shaping_ ? "on" : "off", limits.max_acceleration);
+    }
+    return limits;
   }
 
   void on_position(const VehicleLocalPosition& msg) {
@@ -141,11 +170,16 @@ class MissionNode : public rclcpp::Node {
     }
     // Integrators only run while we are actually flying the vehicle; on the
     // ground or in another mode they would wind up and kick on take-off.
+    // Likewise the reference starts from wherever the vehicle is when we take over.
     if (!vehicle_.armed || !vehicle_.offboard_active) {
       position_controller_.reset();
+      reference_generator_.reset(vehicle_.position_ned, velocity);
     }
     const auto sp =
-        position_controller_.update(*target_, target_yaw_, vehicle_.position_ned, velocity, dt);
+        shaping_ ? position_controller_.update(reference_generator_.update(*target_, dt),
+                                               target_yaw_, vehicle_.position_ned, velocity, dt)
+                 : position_controller_.update(*target_, target_yaw_, vehicle_.position_ned,
+                                               velocity, dt);
     publish_attitude_setpoint(sp.attitude, sp.thrust);
   }
 
@@ -250,6 +284,8 @@ class MissionNode : public rclcpp::Node {
   MissionStateMachine mission_;
   ControllerType controller_type_;
   PositionController position_controller_;
+  bool shaping_;
+  ReferenceGenerator reference_generator_;
   VehicleState vehicle_;
   bool have_status_{false};
   std::optional<Eigen::Vector3d> target_;

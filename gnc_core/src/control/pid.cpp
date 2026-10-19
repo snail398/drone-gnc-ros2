@@ -16,11 +16,14 @@ double Pid::update(double setpoint, double measurement, double dt) {
   }
 
   double d_term = 0.0;
-  if (has_prev_measurement_) {
-    d_term = -gains_.kd * (measurement - prev_measurement_) / dt;
+  if (has_prev_sample_) {
+    d_term = gains_.derivative_on == DerivativeOn::kError
+                 ? gains_.kd * (error - prev_error_) / dt
+                 : -gains_.kd * (measurement - prev_measurement_) / dt;
   }
   prev_measurement_ = measurement;
-  has_prev_measurement_ = true;
+  prev_error_ = error;
+  has_prev_sample_ = true;
 
   // Conditional integration: do not grow the integral further into saturation.
   const double unsaturated = p_term + integral_term_ + d_term;
@@ -37,7 +40,8 @@ double Pid::update(double setpoint, double measurement, double dt) {
 void Pid::reset() {
   integral_term_ = 0.0;
   prev_measurement_ = 0.0;
-  has_prev_measurement_ = false;
+  prev_error_ = 0.0;
+  has_prev_sample_ = false;
 }
 
 }  // namespace gnc::control

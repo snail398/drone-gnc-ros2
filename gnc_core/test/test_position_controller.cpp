@@ -28,16 +28,24 @@ double yaw_of(const Eigen::Quaterniond& q) {
   return std::atan2(nose.y(), nose.x());
 }
 
-// Point-mass multicopter that reaches the commanded attitude instantly.
+// Point-mass multicopter. The thrust direction follows the commanded attitude
+// instantly, or with a first-order lag standing in for the attitude loop.
 // `true_hover_thrust` may differ from what the controller assumes.
 struct PointMass {
   double true_hover_thrust{0.6};
+  double attitude_lag{0.0};  // s
   Eigen::Vector3d position{Eigen::Vector3d::Zero()};
   Eigen::Vector3d velocity{Eigen::Vector3d::Zero()};
+  Eigen::Vector3d thrust_dir{0.0, 0.0, -1.0};
 
   void step(const AttitudeThrustSetpoint& sp, double dt) {
-    const Eigen::Vector3d thrust_acc =
-        -body_z_of(sp.attitude) * (sp.thrust / true_hover_thrust) * kGravity;
+    const Eigen::Vector3d commanded = -body_z_of(sp.attitude);
+    if (attitude_lag > 0.0) {
+      thrust_dir = (thrust_dir + (commanded - thrust_dir) * (dt / attitude_lag)).normalized();
+    } else {
+      thrust_dir = commanded;
+    }
+    const Eigen::Vector3d thrust_acc = thrust_dir * (sp.thrust / true_hover_thrust) * kGravity;
     const Eigen::Vector3d acc = thrust_acc + Eigen::Vector3d(0.0, 0.0, kGravity);
     velocity += acc * dt;
     position += velocity * dt;
@@ -135,4 +143,42 @@ TEST(PositionController, ClosedLoopReachesTargetWithHoverThrustError) {
   EXPECT_LT((vehicle.position - target).norm(), 0.05);
   EXPECT_LT(vehicle.velocity.norm(), 0.05);
   EXPECT_LE(max_tilt_seen, config.max_tilt + 1e-9);
+}
+
+// 10 m step with a lagging attitude loop: following a shaped reference (with
+// feed-forward and D on the error) must overshoot far less than chasing the
+// step target directly, while arriving about as fast.
+TEST(PositionController, ShapedReferenceCutsOvershoot) {
+  const Eigen::Vector3d start(0.0, 0.0, -5.0);
+  const Eigen::Vector3d target(10.0, 0.0, -5.0);
+  constexpr double kStep = 0.02;
+  constexpr int kSteps = 1500;
+
+  auto fly = [&](bool shaped) {
+    PositionControllerConfig config;
+    if (shaped) {
+      config.velocity_xy.derivative_on = gnc::control::DerivativeOn::kError;
+    }
+    PositionController controller(config);
+    gnc::guidance::ReferenceGenerator generator(gnc::guidance::ReferenceLimits{});
+    generator.reset(start, Eigen::Vector3d::Zero());
+    PointMass vehicle{.attitude_lag = 0.15, .position = start};
+
+    double max_north = 0.0;
+    for (int i = 0; i < kSteps; ++i) {
+      const auto sp =
+          shaped ? controller.update(generator.update(target, kStep), 0.0, vehicle.position,
+                                     vehicle.velocity, kStep)
+                 : controller.update(target, 0.0, vehicle.position, vehicle.velocity, kStep);
+      vehicle.step(sp, kStep);
+      max_north = std::max(max_north, vehicle.position.x());
+    }
+    EXPECT_LT((vehicle.position - target).norm(), 0.05) << (shaped ? "shaped" : "step");
+    return max_north - target.x();
+  };
+
+  const double overshoot_step = fly(false);
+  const double overshoot_shaped = fly(true);
+  EXPECT_GT(overshoot_step, 0.5);  // the M3 behaviour this test guards against
+  EXPECT_LT(overshoot_shaped, 0.25);
 }

@@ -6,6 +6,13 @@ mission_node:
     # sends attitude + thrust and PX4 only runs its attitude/rate loops.
     controller: px4
     hover_thrust: 0.6  # x500 in Gazebo (PX4 MPC_THR_HOVER); used by the own controller
+    # Own controller: follow a reference with bounded acceleration instead of jumping
+    # to each waypoint (cuts corner overshoot).
+    trajectory_shaping: true
+    max_acceleration: 3.0  # m/s^2
+    # Horizontal velocity integrator. PX4's default is 0.4; with the shaped reference
+    # 0.2 gave the smallest path and altitude error in SITL (see README).
+    velocity_xy_i: 0.2
     takeoff_altitude: 5.0
     acceptance_radius: 0.5
     hold_time: 2.0

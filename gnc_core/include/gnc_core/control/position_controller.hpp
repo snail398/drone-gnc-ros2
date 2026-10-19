@@ -4,6 +4,7 @@
 #include <Eigen/Geometry>
 
 #include "gnc_core/control/pid.hpp"
+#include "gnc_core/guidance/reference_generator.hpp"
 
 namespace gnc::control {
 
@@ -41,6 +42,13 @@ class PositionController {
  public:
   explicit PositionController(const PositionControllerConfig& config);
 
+  // Track a reference with velocity and acceleration feed-forward
+  // (e.g. from gnc::guidance::ReferenceGenerator).
+  [[nodiscard]] AttitudeThrustSetpoint update(const guidance::Reference& reference,
+                                              double yaw_setpoint, const Eigen::Vector3d& position,
+                                              const Eigen::Vector3d& velocity, double dt);
+
+  // Hold a fixed position: a reference with zero velocity and acceleration.
   [[nodiscard]] AttitudeThrustSetpoint update(const Eigen::Vector3d& position_setpoint,
                                               double yaw_setpoint, const Eigen::Vector3d& position,
                                               const Eigen::Vector3d& velocity, double dt);
@@ -51,7 +59,8 @@ class PositionController {
   [[nodiscard]] const PositionControllerConfig& config() const { return config_; }
 
  private:
-  [[nodiscard]] Eigen::Vector3d velocity_setpoint(const Eigen::Vector3d& position_error) const;
+  [[nodiscard]] Eigen::Vector3d velocity_setpoint(
+      const Eigen::Vector3d& position_error, const Eigen::Vector3d& velocity_feedforward) const;
 
   PositionControllerConfig config_;
   Pid vel_x_;

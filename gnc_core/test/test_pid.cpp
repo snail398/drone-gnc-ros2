@@ -53,6 +53,15 @@ TEST(Pid, DerivativeOpposesMeasurementChange) {
   EXPECT_DOUBLE_EQ(pid.update(0.0, 0.5, 0.1), -5.0);
 }
 
+TEST(Pid, DerivativeOnErrorFollowsSetpointChange) {
+  Pid pid({.kd = 1.0, .derivative_on = gnc::control::DerivativeOn::kError});
+  std::ignore = pid.update(0.0, 0.0, 0.1);
+  // Setpoint moves by 1 in 0.1 s: d(error)/dt = 10.
+  EXPECT_DOUBLE_EQ(pid.update(1.0, 0.0, 0.1), 10.0);
+  // Measurement catches up: error drops back to 0.
+  EXPECT_DOUBLE_EQ(pid.update(1.0, 1.0, 0.1), -10.0);
+}
+
 TEST(Pid, NonPositiveDtSkipsIntegration) {
   Pid pid({.kp = 1.0, .ki = 1.0});
   EXPECT_DOUBLE_EQ(pid.update(2.0, 0.0, 0.0), 2.0);

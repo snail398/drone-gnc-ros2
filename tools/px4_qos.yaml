@@ -1,0 +1,15 @@
+# QoS overrides for recording PX4 topics with ros2 bag: PX4 publishes best-effort,
+# and a reliable subscription would receive nothing.
+#   ros2 bag record --qos-profile-overrides-path tools/px4_qos.yaml <topics>
+/fmu/out/vehicle_local_position_v1:
+  reliability: best_effort
+  history: keep_last
+  depth: 10
+/fmu/out/vehicle_status_v1:
+  reliability: best_effort
+  history: keep_last
+  depth: 10
+/fmu/out/vehicle_attitude:
+  reliability: best_effort
+  history: keep_last
+  depth: 10
